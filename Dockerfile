@@ -1,8 +1,9 @@
-FROM python:3.9.2-slim
+FROM python:3.9.2
 
 COPY requirements.txt /
-RUN pip3 install -r /requirements.txt
+RUN pip3 install --no-cache -r /requirements.txt
 
+COPY names.py /
 COPY main.py /
 WORKDIR /
 ENTRYPOINT ["python3", "main.py"]
