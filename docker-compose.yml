@@ -8,12 +8,15 @@ services:
     env_file:
      - CONFIG.env
   mongo:
-    image: 'mongo:latest'
+    image: 'webhippie/mongodb:latest'
     environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+      MONGODB_ROOT_USERNAME: root
+      MONGODB_ROOT_PASSWORD: rootpassword
+      MONGODB_USERNAME: root
+      MONGODB_NOAUTH: "true"
+      MONGODB_VERBOSE: "true"
     volumes:
-      - mongodb_data_container:/data/db
+      - mongodb_data_container:/var/lib/mongodb
     restart: unless-stopped
 
 volumes:

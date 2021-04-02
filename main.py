@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import motor.motor_asyncio
+import pymongo
 import names
 from fuzzywuzzy import process as fwproc
 
@@ -22,7 +23,7 @@ intents.voice_states = True
 
 bot = commands.Bot(command_prefix=os.getenv('BOT_COMMAND_PREFIX') or '>', intents=intents)
 
-client = motor.motor_asyncio.AsyncIOMotorClient('mongodb://mongo:27017/', username='root', password='rootpassword')
+client = motor.motor_asyncio.AsyncIOMotorClient('mongodb://mongo:27017/')#, username='root', password='rootpassword')
 db = client.db
 
 async def generate_name_indexes(attempts = 50):
@@ -467,6 +468,9 @@ async def show_rules(ctx, in_entire_guild: bool=False):
 
     rule_cursor = db.rules.find(query)
     rule_list = await rule_cursor.to_list(None)
+    if not rule_list:
+        await ctx.send('There are no rules active in this ' + ('server' if in_entire_guild else 'channel')+'.')
+        return
     rule_name_list = '\n'.join(map(lambda x: '`'+Rule(**x).name+'`', rule_list))
     await ctx.send('There are '+str(len(rule_list))+' rules active in this '+('server' if in_entire_guild else 'channel') + ':\n' + rule_name_list)
     
@@ -492,12 +496,15 @@ async def on_voice_state_update(member, before, after):
 @add_rule.error
 @bot.event
 async def on_command_error(ctx, exception, guild=None):
+    if isinstance(exception, discord.ext.commands.errors.CommandNotFound): return  # errors where the command is wrong should not be reported.    
     emb = discord.Embed()
     emb.color = discord.Color.red()
     emb.title = 'An error occurred! :('
-    emb.description = '```\n'+''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))+'\n```'
+    if isinstance(exception, pymongo.errors.OperationFailure):  # this traceback is too long for an embed.
+        emb.description = '```'+repr(exception)+'```'
+    else:
+        emb.description = '```\n'+''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))+'\n```'
 
-    if isinstance(exception, discord.ext.commands.errors.CommandNotFound): return  # errors where the command is wrong should not be reported.    
 
     # Try to send this anywhere we can.
     # First, use the default context.

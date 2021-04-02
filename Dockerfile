@@ -4,7 +4,7 @@ COPY requirements.txt /
 RUN pip3 install --no-cache -r /requirements.txt
 
 COPY names.py /
-COPY main.py /
 WORKDIR /
 ENTRYPOINT ["python3", "main.py"]
+COPY main.py /
 
