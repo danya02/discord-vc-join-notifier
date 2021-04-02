@@ -345,13 +345,14 @@ async def add_rule(ctx,
             return
 
         await rule.generate_name()
-        member_is_manager = ctx.author.permissions_for(ctx.channel).manage_guild
+        member_is_manager = ctx.author.permissions_in(ctx.channel).manage_guild
         if not member_is_manager:
             tell_who = tell_who or [ctx.author]
             if len(tell_who)>1 or tell_who[0] != ctx.author:
                 ctx.send(ctx.author.mention+''', you have tried to mention people other than yourself with this rule without having the "Manage Server" permission.
 Please edit your rule to exclude other users from the list of people to be notified.''', embed=rule.as_embed())
                 return
+        
         CHECK_MARK = '✅'
         CANCEL_MARK = '❌'
         emojis = [CHECK_MARK, CANCEL_MARK]
@@ -380,7 +381,7 @@ Please edit your rule to exclude other users from the list of people to be notif
                 await msg.clear_reactions()
             except discord.Forbidden:
                 await cannot_clear_reactions(ctx)
-        else:
+        elif reaction == CHECK_MARK:
             await db.rules.insert_one(rule.to_json())
             await msg.edit(content='Rule confirmed.')
             try:
@@ -409,26 +410,25 @@ async def del_rule(ctx, name):
         await ctx.send(prefix + 'A rule by name `'+name+'` was found, but it belongs to a different server so we cannot show it to you.')
 
 
-    member_is_manager = ctx.author.permissions_for(ctx.channel).manage_guild
+    member_is_manager = ctx.author.permissions_in(ctx.channel).manage_guild
     mentions_nobody = len(rule.users_to_mention or [])==0
     mentions_only_me = False
     if rule.users_to_mention:
         mentions_only_me = rule.users_to_mention[0] == Userlike.from_discord_model(ctx.author)
     
 
-
-    if member_is_manager or mentions_nobody or mentions_only_me:
+    if not (member_is_manager or mentions_nobody or mentions_only_me):
         await ctx.send(content=prefix + 'This rule was found, but it mentions users other than you. '+\
             'If a rule mentions users, it can be removed by a server manager or by the only user mentioned, if applicable.', embed=rule.as_embed())
         return
     
 
-    msg = await ctx.send(content=prefix + 'This rule was found, do you want to delete it? '+CHECK_MARK+' for yes, '+CANCEL_MARK+' for no.', embed=rule.as_embed())
-    CHECK_MARK = '✅'
-    CANCEL_MARK = '❌'
-    emojis = [CHECK_MARK, CANCEL_MARK]
+    TRASH = '🗑️'
+    CANCEL_MARK = '🚫'
+    emojis = [TRASH, CANCEL_MARK]
+    msg = await ctx.send(content=prefix + 'This rule was found, do you want to delete it? '+TRASH+' for yes, '+CANCEL_MARK+' for no.', embed=rule.as_embed())
     try:
-        await msg.add_reaction(CHECK_MARK)
+        await msg.add_reaction(TRASH)
         await msg.add_reaction(CANCEL_MARK)
     except discord.Forbidden:
         await msg.edit(content='This bot cannot add reactions to messages, but this is required.')
@@ -447,9 +447,9 @@ async def del_rule(ctx, name):
     reaction = reaction.emoji
     if reaction == CANCEL_MARK:
         await msg.edit(content='This rule will not be deleted.')
-
-    await db.rules.delete_one({'name_indexes': indexes})
-    await msg.edit(content='This rule was successfully deleted')
+    elif reaction == TRASH:
+        await db.rules.delete_one({'name_indexes': indexes})
+        await msg.edit(content='This rule was successfully deleted')
     try:
         await msg.clear_reactions()
     except discord.Forbidden:
@@ -496,7 +496,9 @@ async def on_command_error(ctx, exception, guild=None):
     emb.color = discord.Color.red()
     emb.title = 'An error occurred! :('
     emb.description = '```\n'+''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))+'\n```'
-    
+
+    if isinstance(exception, discord.ext.commands.errors.CommandNotFound): return  # errors where the command is wrong should not be reported.    
+
     # Try to send this anywhere we can.
     # First, use the default context.
     # If that fails, or the context is not available (for example from custom invocations), then try the guild's system notifications channel.
