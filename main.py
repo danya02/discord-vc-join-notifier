@@ -67,6 +67,9 @@ class Userlike:
         self.type = type
         self.id = id
 
+    def __eq__(self, other):
+        return (self.type, self.id) == (other.type, other.id)
+
     @classmethod
     def from_discord_model(cls, model):
         if isinstance(model, discord.Member): return cls(UserlikeType.MEMBER, model.id)
@@ -309,9 +312,6 @@ class Rule:
 
 
 
-@bot.command()
-async def ping(ctx):
-    await ctx.send('pong')
 
 @bot.command(brief='Add a notification rule.',
 help='''Add a rule to send notifications on voice channel events.
@@ -345,7 +345,7 @@ async def add_rule(ctx,
             return
 
         await rule.generate_name()
-        member_is_manager = ctx.author.guild_permissions.manage_guild
+        member_is_manager = ctx.author.permissions_for(ctx.channel).manage_guild
         if not member_is_manager:
             tell_who = tell_who or [ctx.author]
             if len(tell_who)>1 or tell_who[0] != ctx.author:
@@ -390,6 +390,86 @@ Please edit your rule to exclude other users from the list of people to be notif
     except Exception as e:
         await on_command_error(ctx, e)
 
+@bot.command(brief='Delete an existing notification rule.',
+help='''Display and optionally delete an existing rule by name.
+To view the rules active in this channel, use the "show_rules" command.''')
+async def del_rule(ctx, name):
+    indexes, exact = parse_name_indexes(*(name.split('-')))
+    prefix = ''
+    if not exact:
+        true_name = name_indexes_to_words(indexes)
+        prefix += 'NOTE: Name `'+name+'` is not valid, assuming `'+true_name+'`.\n'
+        name = true_name
+    rule = await db.rules.find_one({'name_indexes': indexes})
+    if not rule:
+        await ctx.send(prefix + 'The rule by name `'+name+'` does not exist.')
+        return
+    rule = Rule(**rule)
+    if rule.guild != ctx.guild:
+        await ctx.send(prefix + 'A rule by name `'+name+'` was found, but it belongs to a different server so we cannot show it to you.')
+
+
+    member_is_manager = ctx.author.permissions_for(ctx.channel).manage_guild
+    mentions_nobody = len(rule.users_to_mention or [])==0
+    mentions_only_me = False
+    if rule.users_to_mention:
+        mentions_only_me = rule.users_to_mention[0] == Userlike.from_discord_model(ctx.author)
+    
+
+
+    if member_is_manager or mentions_nobody or mentions_only_me:
+        await ctx.send(content=prefix + 'This rule was found, but it mentions users other than you. '+\
+            'If a rule mentions users, it can be removed by a server manager or by the only user mentioned, if applicable.', embed=rule.as_embed())
+        return
+    
+
+    msg = await ctx.send(content=prefix + 'This rule was found, do you want to delete it? '+CHECK_MARK+' for yes, '+CANCEL_MARK+' for no.', embed=rule.as_embed())
+    CHECK_MARK = '✅'
+    CANCEL_MARK = '❌'
+    emojis = [CHECK_MARK, CANCEL_MARK]
+    try:
+        await msg.add_reaction(CHECK_MARK)
+        await msg.add_reaction(CANCEL_MARK)
+    except discord.Forbidden:
+        await msg.edit(content='This bot cannot add reactions to messages, but this is required.')
+        await cannot_add_reactions(ctx)
+        return
+    try:
+        reaction, _ = await bot.wait_for('reaction_add',
+                                         check=lambda r, u: r.emoji in emojis and r.message.id == msg.id and u == ctx.author,
+                                         timeout=120)
+    except asyncio.TimeoutError:
+        await msg.edit(content='Confirmation timed out, to confirm this action please repeat the command.')
+        try:
+            await msg.clear_reactions()
+        except discord.Forbidden:
+            await cannot_clear_reactions(ctx)
+    reaction = reaction.emoji
+    if reaction == CANCEL_MARK:
+        await msg.edit(content='This rule will not be deleted.')
+
+    await db.rules.delete_one({'name_indexes': indexes})
+    await msg.edit(content='This rule was successfully deleted')
+    try:
+        await msg.clear_reactions()
+    except discord.Forbidden:
+        await cannot_clear_reactions(ctx)
+
+
+@bot.command(brief='List rules active in this channel or server.',
+help='''List the currently enabled rules in this channel or this server.
+
+By default, shows the rules in current channel. To view rules in entire server, add "yes" as an optional parameter.''')
+async def show_rules(ctx, in_entire_guild: bool=False):
+    query = {'guild': ctx.guild.id}
+    if not in_entire_guild:
+        query['channel_to_mention'] = ctx.channel.id
+
+    rule_cursor = db.rules.find(query)
+    rule_list = await rule_cursor.to_list(None)
+    rule_name_list = '\n'.join(map(lambda x: '`'+Rule(**x).name+'`', rule_list))
+    await ctx.send('There are '+str(len(rule_list))+' rules active in this '+('server' if in_entire_guild else 'channel') + ':\n' + rule_name_list)
+    
 @bot.event
 async def on_voice_state_update(member, before, after):
     try:
