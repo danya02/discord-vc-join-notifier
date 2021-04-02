@@ -9,5 +9,5 @@ run:
 stop:
 	docker-compose down
 
-install:
+install: build
 	docker-compose up -d
